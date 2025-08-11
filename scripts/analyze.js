@@ -24,6 +24,7 @@ const {
   const timestamp = getTimestamp();
   const jsonReportPath = path.join(reportsDir, `search-report-${timestamp}.json`);
   const csvReportPath = path.join(reportsDir, `search-report-${timestamp}.csv`);
+  const txtReportPath = path.join(reportsDir, `search-report-${timestamp}.txt`);
 
   let totalDocuments = 0;
   let totalDocumentsWithMatches = 0;
@@ -98,8 +99,13 @@ const {
   }
   fs.writeFileSync(csvReportPath, csvLines.join('\n'));
 
+  // Write TXT with only URLs (one per line)
+  const urlLines = entries.map((e) => e.docUrl).join('\n');
+  fs.writeFileSync(txtReportPath, urlLines + (urlLines.endsWith('\n') ? '' : '\n'));
+
   console.log(`[analyze] Report written: ${jsonReportPath}`);
   console.log(`[analyze] CSV written: ${csvReportPath}`);
+  console.log(`[analyze] TXT written: ${txtReportPath}`);
   console.log(`[analyze] Summary: ${totalDocumentsWithMatches}/${totalDocuments} documents with matches, total occurrences: ${totalOccurrences}`);
 
   await client.close();
