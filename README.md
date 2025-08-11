@@ -27,6 +27,7 @@ Environment variables:
 - BASE_URL: base URL to build a human-friendly doc URL from each document `slug` (default `https://bizee.com`).
 - DRY_RUN: `true` (default) does not write changes; set `false` to apply changes.
 - LIMIT: optional limit of documents to update (useful for testing).
+- VIDEO_THUMBNAIL_ID: optional. When a plain object contains `videoLink` exactly equal to `SEARCH_URL`, the script updates that `videoLink` to `REPLACE_URL` and sets its sibling `thumbnail` to this ID.
 
 Note: You do not need `MONGODB_COLLECTION`; the scripts iterate all collections in the DB.
 
@@ -46,7 +47,7 @@ Outputs in `reports/`:
 Logs include the collection name and a "collection URL" (derived from the URI and collection name).
 
 #### Replace found URLs
-Reads the latest generated report and applies deep replacements (strings anywhere in the document/structure):
+Reads the latest generated report and applies replacements:
 ```bash
 npm run replace
 ```
@@ -59,9 +60,21 @@ Options:
 - `--dry-run=false|true`: force write or simulation mode.
 - `--limit=100`: process only N documents (useful for testing).
 
+##### Update videoLink and sibling thumbnail
+If a plain object contains `videoLink` with a value exactly equal to `SEARCH_URL`, the script:
+- sets `videoLink` to `REPLACE_URL`, and
+- sets its sibling `thumbnail` to `VIDEO_THUMBNAIL_ID` (when provided).
+
+Example `.env` fragment:
+```env
+SEARCH_URL=https://incfile.wistia.com/medias/qz5sc1kfic
+REPLACE_URL=https://incfile.wistia.com/medias/qz5sc1kfic
+VIDEO_THUMBNAIL_ID=689a1bae6d1be35336609741
+```
+
 ### How it works
 - Iterates all collections in the DB (`listCollections`).
-- For each document, searches for `SEARCH_URL` in any string value (recursively visits objects and arrays) and counts occurrences.
+- For each document, searches for `SEARCH_URL` in any string value (recursively visits plain objects and arrays) and counts occurrences.
 - Report per document includes:
   - `collection`: collection name
   - `id`: `_id` as string
@@ -70,9 +83,9 @@ Options:
   - `totalOccurrences`
   - `fields`: list of `{ path, count }` for each field with matches
 - Replacement:
-  - Keeps `_id` unchanged.
-  - Replaces all occurrences of `SEARCH_URL` with `REPLACE_URL` in strings.
-  - Writes back using `replaceOne` for the whole document (preserves `_id`).
+  - Keeps `_id` unchanged and preserves Date/ObjectId/BSON types.
+  - Applies `$set` updates only on string paths that need replacement.
+  - Additionally, when an object has `videoLink === SEARCH_URL`, updates `videoLink` to `REPLACE_URL` and `thumbnail` to `VIDEO_THUMBNAIL_ID` (if provided).
   - Logs are grouped per collection.
 
 ### Examples
