@@ -1,6 +1,6 @@
 const {
   getEnv,
-  connectToCollection,
+  connectToDb,
   getCollectionUrl,
   buildDocumentUrl,
   ensureReportsDir,
@@ -8,6 +8,7 @@ const {
   parseArgs,
   readJson,
   findLatestReportFile,
+  parseId,
 } = require('./lib');
 const path = require('path');
 
@@ -26,36 +27,48 @@ const path = require('path');
     throw new Error('No report file found. Provide with --from=path/to/search-report-*.json');
   }
 
-  const { client, collection, config } = await connectToCollection();
-  const collectionUrl = getCollectionUrl(config.uri, config.dbName, config.collectionName);
-  console.log(`[replace] Connected to collection: ${config.collectionName} (URL: ${collectionUrl})`);
+  const { client, db, config } = await connectToDb();
+  console.log(`[replace] Connected to DB: ${config.dbName}`);
   console.log(`[replace] Using report: ${reportPath}`);
   console.log(`[replace] Replacing ${searchUrl} -> ${replaceUrl} | dryRun=${dryRun} | limit=${limit ?? 'none'}`);
 
   const report = readJson(reportPath);
-  const ids = report.entries.map((e) => e.id);
+  const entries = report.entries || [];
 
   let processed = 0;
   let updatedDocuments = 0;
   let totalReplacements = 0;
 
-  for (const id of ids) {
-    if (limit !== undefined && processed >= limit) break;
-    processed += 1;
+  // Group by collection for nicer logs
+  const byCollection = new Map();
+  for (const e of entries) {
+    if (!byCollection.has(e.collection)) byCollection.set(e.collection, []);
+    byCollection.get(e.collection).push(e);
+  }
 
-    const doc = await collection.findOne({ _id: require('mongodb').ObjectId.createFromHexString(id) }).catch(() => null);
-    if (!doc) continue;
+  for (const [collectionName, group] of byCollection.entries()) {
+    const collection = db.collection(collectionName);
+    const collectionUrl = getCollectionUrl(process.env.MONGODB_URI, config.dbName, collectionName);
+    console.log(`[replace] Processing collection: ${collectionName} (URL: ${collectionUrl})`);
 
-    const { updated, replacements } = walkAndReplace(doc, searchUrl, replaceUrl);
-    if (replacements > 0) {
-      const docUrl = buildDocumentUrl(updated.slug ?? doc.slug);
-      console.log(`[replace] Doc ${id} (${docUrl}) -> ${replacements} replacement(s)`);
+    for (const e of group) {
+      if (limit !== undefined && processed >= limit) break;
+      processed += 1;
 
-      totalReplacements += replacements;
-      if (!dryRun) {
-        // Replace the entire document, preserving the _id
-        await collection.replaceOne({ _id: doc._id }, updated, { upsert: false });
-        updatedDocuments += 1;
+      const queryId = parseId(e.id);
+      const doc = await collection.findOne({ _id: queryId }).catch(() => null);
+      if (!doc) continue;
+
+      const { updated, replacements } = walkAndReplace(doc, searchUrl, replaceUrl);
+      if (replacements > 0) {
+        const docUrl = buildDocumentUrl(updated.slug ?? doc.slug);
+        console.log(`[replace] ${collectionName} doc ${e.id} (${docUrl}) -> ${replacements} replacement(s)`);
+
+        totalReplacements += replacements;
+        if (!dryRun) {
+          await collection.replaceOne({ _id: doc._id }, updated, { upsert: false });
+          updatedDocuments += 1;
+        }
       }
     }
   }

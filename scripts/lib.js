@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb');
 require('dotenv').config();
 
 function getEnv(name, defaultValue, required = false) {
@@ -27,12 +27,25 @@ function redactMongoUri(uri) {
 function getMongoConfig() {
   const uri = getEnv('MONGODB_URI', undefined, true);
   const dbName = getEnv('MONGODB_DB', undefined, true);
-  const collectionName = getEnv('MONGODB_COLLECTION', undefined, true);
+  // Collection is optional now for DB-wide iteration
+  const collectionName = getEnv('MONGODB_COLLECTION', '');
   return { uri, dbName, collectionName };
 }
 
+async function connectToDb() {
+  const { uri, dbName } = getMongoConfig();
+  const client = new MongoClient(uri);
+  await client.connect();
+  const db = client.db(dbName);
+  return { client, db, config: { uri, dbName } };
+}
+
+// Backwards compatibility helper (not used by new scripts)
 async function connectToCollection() {
   const { uri, dbName, collectionName } = getMongoConfig();
+  if (!collectionName) {
+    throw new Error('MONGODB_COLLECTION is not set. Use DB-wide scripts or set the env var.');
+  }
   const client = new MongoClient(uri);
   await client.connect();
   const db = client.db(dbName);
@@ -145,7 +158,6 @@ function walkAndReplace(value, searchUrl, replaceUrl) {
     if (typeof node === 'object') {
       const result = Array.isArray(node) ? [] : {};
       for (const [key, val] of Object.entries(node)) {
-        // Never attempt to replace _id value
         if (key === '_id') {
           result[key] = val;
           continue;
@@ -190,10 +202,24 @@ function findLatestReportFile() {
   return files.length ? path.join(reportsDir, files[0].f) : null;
 }
 
+async function listCollectionNames(db) {
+  const cols = await db.listCollections({}, { nameOnly: true }).toArray();
+  return cols.map((c) => c.name);
+}
+
+function parseId(idStr) {
+  if (typeof idStr !== 'string') return idStr;
+  if (/^[a-fA-F0-9]{24}$/.test(idStr)) {
+    try { return ObjectId.createFromHexString(idStr); } catch { /* ignore */ }
+  }
+  return idStr;
+}
+
 module.exports = {
   getEnv,
   redactMongoUri,
   getMongoConfig,
+  connectToDb,
   connectToCollection,
   getCollectionUrl,
   buildDocumentUrl,
@@ -204,4 +230,6 @@ module.exports = {
   parseArgs,
   readJson,
   findLatestReportFile,
+  listCollectionNames,
+  parseId,
 };
