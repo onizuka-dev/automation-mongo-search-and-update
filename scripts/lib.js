@@ -87,6 +87,12 @@ function getTimestamp() {
   return `${yyyy}${MM}${dd}-${HH}${mm}${ss}`;
 }
 
+function isPlainObject(value) {
+  if (value === null || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 function countOccurrencesInString(haystack, needle) {
   if (!haystack || !needle) return 0;
   let count = 0;
@@ -123,7 +129,7 @@ function walkAndCountOccurrences(value, searchUrl, currentPath = '') {
       return;
     }
 
-    if (typeof node === 'object') {
+    if (isPlainObject(node)) {
       for (const [key, val] of Object.entries(node)) {
         const nextPath = pathSoFar ? `${pathSoFar}.${key}` : key;
         visit(val, nextPath);
@@ -155,8 +161,8 @@ function walkAndReplace(value, searchUrl, replaceUrl) {
       return node.map((item) => visit(item));
     }
 
-    if (typeof node === 'object') {
-      const result = Array.isArray(node) ? [] : {};
+    if (isPlainObject(node)) {
+      const result = {};
       for (const [key, val] of Object.entries(node)) {
         if (key === '_id') {
           result[key] = val;
@@ -167,11 +173,49 @@ function walkAndReplace(value, searchUrl, replaceUrl) {
       return result;
     }
 
+    // For non-plain objects (Date, ObjectId, BSON types, etc.), return as-is
     return node;
   }
 
   const updated = visit(value);
   return { updated, replacements };
+}
+
+function computeStringReplacementSets(value, searchUrl, replaceUrl, basePath = '') {
+  let replacements = 0;
+  const sets = {};
+
+  function visit(node, pathSoFar) {
+    if (node === null || node === undefined) return;
+
+    if (typeof node === 'string') {
+      if (node.includes(searchUrl) && pathSoFar) {
+        const count = countOccurrencesInString(node, searchUrl);
+        replacements += count;
+        sets[pathSoFar] = node.split(searchUrl).join(replaceUrl);
+      }
+      return;
+    }
+
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i += 1) {
+        const idxPath = pathSoFar ? `${pathSoFar}.${i}` : String(i);
+        visit(node[i], idxPath);
+      }
+      return;
+    }
+
+    if (isPlainObject(node)) {
+      for (const [key, val] of Object.entries(node)) {
+        if (key === '_id') continue;
+        const nextPath = pathSoFar ? `${pathSoFar}.${key}` : key;
+        visit(val, nextPath);
+      }
+    }
+  }
+
+  visit(value, basePath);
+  return { replacements, sets };
 }
 
 function parseArgs(argv) {
@@ -225,8 +269,10 @@ module.exports = {
   buildDocumentUrl,
   ensureReportsDir,
   getTimestamp,
+  isPlainObject,
   walkAndCountOccurrences,
   walkAndReplace,
+  computeStringReplacementSets,
   parseArgs,
   readJson,
   findLatestReportFile,

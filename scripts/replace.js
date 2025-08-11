@@ -4,7 +4,7 @@ const {
   getCollectionUrl,
   buildDocumentUrl,
   ensureReportsDir,
-  walkAndReplace,
+  computeStringReplacementSets,
   parseArgs,
   readJson,
   findLatestReportFile,
@@ -59,14 +59,14 @@ const path = require('path');
       const doc = await collection.findOne({ _id: queryId }).catch(() => null);
       if (!doc) continue;
 
-      const { updated, replacements } = walkAndReplace(doc, searchUrl, replaceUrl);
-      if (replacements > 0) {
-        const docUrl = buildDocumentUrl(updated.slug ?? doc.slug);
+      const { replacements, sets } = computeStringReplacementSets(doc, searchUrl, replaceUrl);
+      if (replacements > 0 && Object.keys(sets).length > 0) {
+        const docUrl = buildDocumentUrl(doc.slug);
         console.log(`[replace] ${collectionName} doc ${e.id} (${docUrl}) -> ${replacements} replacement(s)`);
 
         totalReplacements += replacements;
         if (!dryRun) {
-          await collection.replaceOne({ _id: doc._id }, updated, { upsert: false });
+          await collection.updateOne({ _id: doc._id }, { $set: sets });
           updatedDocuments += 1;
         }
       }
