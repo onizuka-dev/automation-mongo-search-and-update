@@ -5,6 +5,7 @@ const {
   buildDocumentUrl,
   ensureReportsDir,
   computeStringReplacementSets,
+  computeVideoLinkThumbnailSets,
   parseArgs,
   readJson,
   findLatestReportFile,
@@ -21,6 +22,7 @@ const path = require('path');
 
   const searchUrl = getEnv('SEARCH_URL', undefined, true);
   const replaceUrl = getEnv('REPLACE_URL', undefined, true);
+  const videoThumbnailId = getEnv('VIDEO_THUMBNAIL_ID', '');
 
   const reportPath = args.from ? path.resolve(String(args.from)) : (findLatestReportFile() || '');
   if (!reportPath) {
@@ -30,7 +32,7 @@ const path = require('path');
   const { client, db, config } = await connectToDb();
   console.log(`[replace] Connected to DB: ${config.dbName}`);
   console.log(`[replace] Using report: ${reportPath}`);
-  console.log(`[replace] Replacing ${searchUrl} -> ${replaceUrl} | dryRun=${dryRun} | limit=${limit ?? 'none'}`);
+  console.log(`[replace] Replacing ${searchUrl} -> ${replaceUrl} | dryRun=${dryRun} | limit=${limit ?? 'none'} | videoThumbnailId=${videoThumbnailId || 'unchanged'}`);
 
   const report = readJson(reportPath);
   const entries = report.entries || [];
@@ -60,20 +62,29 @@ const path = require('path');
       if (!doc) continue;
 
       const { replacements, sets } = computeStringReplacementSets(doc, searchUrl, replaceUrl);
-      if (replacements > 0 && Object.keys(sets).length > 0) {
-        const docUrl = buildDocumentUrl(doc.slug);
-        console.log(`[replace] ${collectionName} doc ${e.id} (${docUrl}) -> ${replacements} replacement(s)`);
+      let changes = replacements;
+      let setsCombined = { ...sets };
 
-        totalReplacements += replacements;
+      if (videoThumbnailId) {
+        const videoRes = computeVideoLinkThumbnailSets(doc, searchUrl, replaceUrl, videoThumbnailId);
+        changes += videoRes.changes;
+        setsCombined = { ...setsCombined, ...videoRes.sets };
+      }
+
+      if (changes > 0 && Object.keys(setsCombined).length > 0) {
+        const docUrl = buildDocumentUrl(doc.slug);
+        console.log(`[replace] ${collectionName} doc ${e.id} (${docUrl}) -> ${changes} change(s)`);
+
+        totalReplacements += changes;
         if (!dryRun) {
-          await collection.updateOne({ _id: doc._id }, { $set: sets });
+          await collection.updateOne({ _id: doc._id }, { $set: setsCombined });
           updatedDocuments += 1;
         }
       }
     }
   }
 
-  console.log(`[replace] Completed. Updated documents: ${updatedDocuments} | Total replacements: ${totalReplacements} | Processed (from report): ${processed}`);
+  console.log(`[replace] Completed. Updated documents: ${updatedDocuments} | Total changes: ${totalReplacements} | Processed (from report): ${processed}`);
 
   await client.close();
 })().catch((err) => {

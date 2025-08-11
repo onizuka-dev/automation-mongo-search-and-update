@@ -218,6 +218,56 @@ function computeStringReplacementSets(value, searchUrl, replaceUrl, basePath = '
   return { replacements, sets };
 }
 
+function computeVideoLinkThumbnailSets(value, searchUrl, replaceUrl, newThumbnailId, basePath = '') {
+  let changes = 0;
+  const sets = {};
+
+  function visit(node, pathSoFar) {
+    if (node === null || node === undefined) return;
+
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i += 1) {
+        const idxPath = pathSoFar ? `${pathSoFar}.${i}` : String(i);
+        visit(node[i], idxPath);
+      }
+      return;
+    }
+
+    if (isPlainObject(node)) {
+      // If this object has a videoLink, check and set
+      if (Object.prototype.hasOwnProperty.call(node, 'videoLink')) {
+        const current = node.videoLink;
+        if (typeof current === 'string') {
+          const shouldReplace = searchUrl ? current === searchUrl : true;
+          if (shouldReplace) {
+            const videoLinkPath = pathSoFar ? `${pathSoFar}.videoLink` : 'videoLink';
+            if (replaceUrl !== undefined) {
+              sets[videoLinkPath] = replaceUrl;
+              changes += 1;
+            }
+            const thumbPath = pathSoFar ? `${pathSoFar}.thumbnail` : 'thumbnail';
+            if (newThumbnailId !== undefined) {
+              if (node.thumbnail !== newThumbnailId) {
+                sets[thumbPath] = newThumbnailId;
+                changes += 1;
+              }
+            }
+          }
+        }
+      }
+      // Recurse into children
+      for (const [key, val] of Object.entries(node)) {
+        if (key === '_id') continue;
+        const nextPath = pathSoFar ? `${pathSoFar}.${key}` : key;
+        visit(val, nextPath);
+      }
+    }
+  }
+
+  visit(value, basePath);
+  return { changes, sets };
+}
+
 function parseArgs(argv) {
   const args = {};
   for (const part of argv.slice(2)) {
@@ -273,6 +323,7 @@ module.exports = {
   walkAndCountOccurrences,
   walkAndReplace,
   computeStringReplacementSets,
+  computeVideoLinkThumbnailSets,
   parseArgs,
   readJson,
   findLatestReportFile,
